@@ -10,6 +10,7 @@ import { Modal, Field, StatusBadge, EmptyState, ConfirmButton, urgencyDot } from
 import { formatKm, formatDate, todayISO, nowISO, formatMoney } from '../../lib/format'
 import { fileToStorableDataURL, isPdfDataUrl, openDataUrl, pickFile } from '../../lib/files'
 import { MAINTENANCE_CATEGORIES } from '../../lib/presets'
+import { DeadlinesSection } from './DeadlinesTab'
 
 export default function MaintenanceTab({ vehicle }: { vehicle: Vehicle }) {
   const settings = useSettings()
@@ -67,10 +68,20 @@ export default function MaintenanceTab({ vehicle }: { vehicle: Vehicle }) {
         </div>
       )}
 
-      {/* À PRÉVOIR — entretiens planifiés (devis) */}
+      {/* À VENIR — tout ce qui arrive : administratif (CT, assurance…) + travaux prévus (devis) */}
+      <h2 className="mb-2 flex items-center gap-2 text-base font-extrabold text-slate-700 dark:text-slate-200">
+        <CalendarClock size={18} /> À venir
+      </h2>
+
+      {/* Administratif (échéances légales/papiers) */}
+      <div className="mb-5">
+        <DeadlinesSection vehicle={vehicle} />
+      </div>
+
+      {/* Travaux prévus (devis) */}
       <div className="mb-3 flex items-center justify-between">
         <h2 className="flex items-center gap-2 text-sm font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-          <CalendarClock size={16} /> À prévoir {planned.length ? `(${planned.length})` : ''}
+          <Wrench size={16} /> Travaux prévus {planned.length ? `(${planned.length})` : ''}
         </h2>
         <button className="btn-ghost !px-3 !py-1.5" onClick={() => setAddStatus('planned')}>
           <Plus size={16} /> Devis
@@ -78,7 +89,7 @@ export default function MaintenanceTab({ vehicle }: { vehicle: Vehicle }) {
       </div>
       {planned.length === 0 ? (
         <p className="mb-2 text-sm text-slate-400">
-          Aucun entretien prévu. Ajoutez un devis (ex. changement de pneus) pour le planifier — vous pourrez le passer en « réalisé » plus tard.
+          Aucun travail prévu. Ajoutez un devis (ex. changement de pneus) pour le planifier — vous pourrez le passer en « réalisé » plus tard.
         </p>
       ) : (
         <div className="space-y-2">
@@ -576,7 +587,9 @@ function dueText(c: ReturnType<typeof computeTask>): string {
         : `à ${formatKm(c.dueKm)}`,
     )
   }
-  return parts.join(' · ')
+  let text = parts.join(' · ')
+  if (c.projected) text += ' (projection carnet)'
+  return text
 }
 
 function TaskForm({ vehicleId, initial, onClose }: { vehicleId: number; initial?: MaintenanceTask; onClose: () => void }) {

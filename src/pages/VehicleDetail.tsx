@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { ArrowLeft, Pencil, Trash2, Gauge, Wrench, Fuel, Receipt, FileText, CalendarClock } from 'lucide-react'
+import { ArrowLeft, Pencil, Trash2, Gauge, Wrench, Fuel, Receipt, FileText } from 'lucide-react'
 import { db } from '../db/db'
 import { deleteVehicleCascade } from '../db/repo'
 import VehicleForm, { type VehicleDraft } from '../components/VehicleForm'
@@ -12,11 +12,9 @@ import MaintenanceTab from '../components/tabs/MaintenanceTab'
 import FuelTab from '../components/tabs/FuelTab'
 import ExpensesTab from '../components/tabs/ExpensesTab'
 import DocumentsTab from '../components/tabs/DocumentsTab'
-import DeadlinesTab from '../components/tabs/DeadlinesTab'
 
 const TABS = [
   { key: 'entretien', label: 'Entretien', icon: Wrench },
-  { key: 'echeances', label: 'Échéances', icon: CalendarClock },
   { key: 'carburant', label: 'Carburant', icon: Fuel },
   { key: 'depenses', label: 'Dépenses', icon: Receipt },
   { key: 'documents', label: 'Documents', icon: FileText },
@@ -112,7 +110,6 @@ export default function VehicleDetail() {
 
       <div className="mt-4">
         {tab === 'entretien' && <MaintenanceTab vehicle={vehicle} />}
-        {tab === 'echeances' && <DeadlinesTab vehicle={vehicle} />}
         {tab === 'carburant' && <FuelTab vehicle={vehicle} />}
         {tab === 'depenses' && <ExpensesTab vehicle={vehicle} />}
         {tab === 'documents' && <DocumentsTab vehicle={vehicle} />}

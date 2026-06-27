@@ -7,7 +7,7 @@ import { validateCT } from '../../db/repo'
 import type { Deadline, DeadlineType, Vehicle } from '../../db/types'
 import { computeDeadline } from '../../lib/scheduling'
 import { useSettings } from '../../lib/useSettings'
-import { Modal, Field, StatusBadge, EmptyState, ConfirmButton, urgencyDot } from '../ui'
+import { Modal, Field, StatusBadge, ConfirmButton, urgencyDot } from '../ui'
 import { formatDate, todayISO, nowISO } from '../../lib/format'
 import { generateICS } from '../../lib/ics'
 import { downloadText } from '../../lib/files'
@@ -20,7 +20,7 @@ const TYPES: { value: DeadlineType; label: string; recurrence?: number }[] = [
   { value: 'autre', label: 'Autre' },
 ]
 
-export default function DeadlinesTab({ vehicle }: { vehicle: Vehicle }) {
+export function DeadlinesSection({ vehicle }: { vehicle: Vehicle }) {
   const settings = useSettings()
   const deadlines = useLiveQuery(
     () => db.deadlines.where('vehicleId').equals(vehicle.id!).sortBy('dueDate'),
@@ -52,14 +52,18 @@ export default function DeadlinesTab({ vehicle }: { vehicle: Vehicle }) {
   return (
     <div>
       <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-sm font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Échéances</h2>
+        <h2 className="flex items-center gap-2 text-sm font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+          <ShieldCheck size={16} /> Administratif {deadlines.length ? `(${deadlines.length})` : ''}
+        </h2>
         <button className="btn-ghost !px-3 !py-1.5" onClick={() => setAdding(true)}>
           <Plus size={16} /> Échéance
         </button>
       </div>
 
       {deadlines.length === 0 ? (
-        <EmptyState icon={<ShieldCheck size={40} />} title="Aucune échéance" hint="Contrôle technique, assurance, Crit'Air, fin de garantie…" />
+        <p className="mb-2 text-sm text-slate-400">
+          Contrôle technique, assurance, vignette Crit'Air, fin de garantie… Ajoutez vos dates administratives.
+        </p>
       ) : (
         <div className="space-y-2">
           {deadlines.map((d) => {

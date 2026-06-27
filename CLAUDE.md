@@ -77,7 +77,10 @@ React 18 + TypeScript + Vite 5 · Tailwind CSS v3 (`darkMode: 'class'`) · Dexie
 - `src/pages/` — Dashboard, Vehicles, VehicleDetail, Settings.
 - `src/components/` — `Layout.tsx` (nav responsive : rail latéral ≥lg, bottom-nav mobile),
   `ui.tsx` (Modal, Field, StatusBadge…), `charts.tsx` (Bar/Line, `isAnimationActive={false}`),
-  `VehicleForm.tsx`, `ErrorBoundary.tsx`, `tabs/` (Maintenance, Deadlines, Fuel, Expenses, Documents).
+  `VehicleForm.tsx`, `ErrorBoundary.tsx`, `tabs/` (Maintenance, Fuel, Expenses, Documents).
+  L'onglet **Échéances a été fusionné dans Entretien** : `DeadlinesTab.tsx` exporte
+  `DeadlinesSection` (Administratif : CT, assurance, Crit'Air, garantie), rendu dans la
+  section « À venir » de `MaintenanceTab` aux côtés des « Travaux prévus » (devis).
 
 ## Conventions UI
 
@@ -92,7 +95,9 @@ React 18 + TypeScript + Vite 5 · Tailwind CSS v3 (`darkMode: 'class'`) · Dexie
 - **Contrôle technique FR** : 1ère visite à 4 ans, puis tous les 2 ans. Le bouton « Validé »
   demande la date du CT réalisé et reporte à +24 mois. Source : service-public.gouv.fr (F2878).
 - **Échéances d'entretien** : mixte km ET temps ; l'urgence = la plus proche des deux.
-  Estimation du km courant = dernier relevé + (km/an ÷ 365 × jours écoulés).
+  Estimation du km courant = dernier relevé + (km/an ÷ 365 × jours écoulés). Sans historique,
+  l'échéance km est **projetée d'après le carnet** (prochain multiple de l'intervalle au-dessus
+  du km actuel) — `TaskComputed.projected` → affiché « (projection carnet) ».
 - Les préréglages XC60 et délais CT sont des **valeurs par défaut paramétrables** (à ajuster
   selon motorisation/année).
 - **Interventions** (`ServiceRecord.status`) : `done` = réalisé (historique) ou `planned` =

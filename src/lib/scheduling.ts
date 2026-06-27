@@ -26,6 +26,8 @@ export interface TaskComputed {
   urgency: Urgency
   /** Date estimée à laquelle la limite km sera atteinte (pour le calendrier). */
   kmDueEstimatedDate?: string
+  /** true si l'échéance est projetée d'après le carnet constructeur (aucun historique). */
+  projected?: boolean
 }
 
 export function computeTask(
@@ -39,8 +41,16 @@ export function computeTask(
   const out: TaskComputed = { urgency: 'unknown' }
 
   // Échéance kilométrique
-  if (task.intervalKm && task.lastDoneKm !== undefined) {
-    const dueKm = task.lastDoneKm + task.intervalKm
+  if (task.intervalKm) {
+    let dueKm: number
+    if (task.lastDoneKm !== undefined) {
+      dueKm = task.lastDoneKm + task.intervalKm
+    } else {
+      // Pas d'historique : on projette d'après le carnet constructeur et le km actuel
+      // (prochain multiple de l'intervalle strictement au-dessus du km estimé).
+      dueKm = (Math.floor(estKm / task.intervalKm) + 1) * task.intervalKm
+      out.projected = true
+    }
     out.dueKm = dueKm
     const kmRemaining = dueKm - estKm
     out.kmRemaining = kmRemaining
