@@ -22,21 +22,27 @@ export default function ExpensesTab({ vehicle }: { vehicle: Vehicle }) {
 
   const year = new Date().getFullYear()
   const inYear = (iso: string) => iso.startsWith(String(year))
-  // Coût global = dépenses + interventions chiffrées + carburant
+  // On ne compte QUE les coûts engagés (interventions réalisées) — les devis (status 'planned') sont exclus.
+  const doneServices = (services ?? []).filter((x) => x.status !== 'planned')
+  const plannedServices = (services ?? []).filter((x) => x.status === 'planned')
+
+  // Coût engagé = dépenses + interventions réalisées chiffrées + carburant
   const total =
     expenses.reduce((s, e) => s + e.amount, 0) +
-    (services?.reduce((s, x) => s + (x.cost ?? 0), 0) ?? 0) +
+    doneServices.reduce((s, x) => s + (x.cost ?? 0), 0) +
     (fuel?.reduce((s, x) => s + (x.totalCost ?? 0), 0) ?? 0)
   const totalYear =
     expenses.filter((e) => inYear(e.date)).reduce((s, e) => s + e.amount, 0) +
-    (services?.filter((x) => inYear(x.date)).reduce((s, x) => s + (x.cost ?? 0), 0) ?? 0) +
+    doneServices.filter((x) => inYear(x.date)).reduce((s, x) => s + (x.cost ?? 0), 0) +
     (fuel?.filter((x) => inYear(x.date)).reduce((s, x) => s + (x.totalCost ?? 0), 0) ?? 0)
+  // Coût prévisionnel (devis non encore réalisés)
+  const plannedTotal = plannedServices.reduce((s, x) => s + (x.cost ?? 0), 0)
 
-  // Coûts par mois sur les 12 derniers mois (dépenses + interventions + carburant)
+  // Coûts par mois sur les 12 derniers mois (engagés uniquement)
   const monthly = buildMonthly(
     [
       ...expenses.map((e) => ({ date: e.date, amount: e.amount })),
-      ...(services ?? []).map((x) => ({ date: x.date, amount: x.cost ?? 0 })),
+      ...doneServices.map((x) => ({ date: x.date, amount: x.cost ?? 0 })),
       ...(fuel ?? []).map((x) => ({ date: x.date, amount: x.totalCost ?? 0 })),
     ],
   )
@@ -51,17 +57,23 @@ export default function ExpensesTab({ vehicle }: { vehicle: Vehicle }) {
         </button>
       </div>
 
-      <div className="mb-4 grid grid-cols-2 gap-3">
+      <div className="mb-3 grid grid-cols-2 gap-3">
         <div className="card p-3 text-center">
           <div className="text-lg font-bold">{formatMoney(totalYear)}</div>
-          <div className="text-[11px] text-slate-400">coût total {year}</div>
+          <div className="text-[11px] text-slate-400">coût engagé {year}</div>
         </div>
         <div className="card p-3 text-center">
           <div className="text-lg font-bold">{formatMoney(total)}</div>
-          <div className="text-[11px] text-slate-400">coût total (tout)</div>
+          <div className="text-[11px] text-slate-400">coût engagé (tout)</div>
         </div>
       </div>
-      <p className="mb-3 text-xs text-slate-400">Inclut dépenses, interventions chiffrées et carburant.</p>
+      {plannedTotal > 0 && (
+        <div className="mb-3 flex items-center justify-between rounded-2xl border-l-4 border-amber-400 bg-amber-50 px-3.5 py-2.5 text-sm dark:bg-amber-500/10">
+          <span className="font-medium text-amber-700 dark:text-amber-300">À prévoir (devis non réalisés)</span>
+          <span className="font-bold text-amber-700 dark:text-amber-300">{formatMoney(plannedTotal)}</span>
+        </div>
+      )}
+      <p className="mb-3 text-xs text-slate-400">Coûts engagés = dépenses + interventions réalisées + carburant. Les devis (prévus) sont comptés à part.</p>
 
       {hasChartData && (
         <div className="card mb-4 p-3">
