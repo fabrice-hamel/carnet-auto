@@ -36,18 +36,19 @@ export interface MaintenanceTask {
   createdAt: string
 }
 
-// Intervention réalisée (historique). Peut clôturer une MaintenanceTask.
+// Intervention réalisée (historique) OU prévue (devis). Peut clôturer une MaintenanceTask.
 export interface ServiceRecord {
   id?: number
   vehicleId: number
   taskId?: number // tâche d'entretien associée (optionnel)
-  date: string
+  status?: 'planned' | 'done' // 'planned' = prévu (devis) ; absent/'done' = réalisé
+  date: string // date réalisée, ou date prévue
   mileage: number
   title: string
-  cost?: number
+  cost?: number // coût réalisé ou estimé (devis)
   vendor?: string // garage / prestataire
   notes?: string
-  documentIds?: number[]
+  documentIds?: number[] // factures (réalisé) ou devis (prévu)
   createdAt: string
 }
 

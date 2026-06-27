@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { Plus, Pencil, Check, History, Trash2, ChevronDown, Wrench, Paperclip, FileText, X } from 'lucide-react'
+import { Plus, Pencil, Check, History, Trash2, ChevronDown, Wrench, Paperclip, FileText, X, CalendarClock } from 'lucide-react'
 import { db } from '../../db/db'
 import { completeTask } from '../../db/repo'
 import type { DocumentBlob, MaintenanceTask, ServiceRecord, Settings, Vehicle } from '../../db/types'
@@ -25,12 +25,28 @@ export default function MaintenanceTab({ vehicle }: { vehicle: Vehicle }) {
   const [adding, setAdding] = useState(false)
   const [completing, setCompleting] = useState<MaintenanceTask | null>(null)
   const [showPlan, setShowPlan] = useState(true)
-  const [addingHistory, setAddingHistory] = useState(false)
+  const [addStatus, setAddStatus] = useState<'planned' | 'done' | null>(null)
   const [editingHistory, setEditingHistory] = useState<ServiceRecord | null>(null)
+  const [forceDone, setForceDone] = useState(false)
 
   if (!tasks) return null
 
   const suggestions = topSuggestions(tasks, vehicle, settings, 3)
+  const planned = (services ?? [])
+    .filter((s) => s.status === 'planned')
+    .slice()
+    .sort((a, b) => a.date.localeCompare(b.date))
+  const done = (services ?? []).filter((s) => s.status !== 'planned')
+
+  const deleteService = async (s: ServiceRecord) => {
+    if (s.documentIds?.length) await db.documents.bulkDelete(s.documentIds)
+    await db.services.delete(s.id!)
+  }
+  const closeForm = () => {
+    setAddStatus(null)
+    setEditingHistory(null)
+    setForceDone(false)
+  }
 
   return (
     <div>
@@ -51,17 +67,46 @@ export default function MaintenanceTab({ vehicle }: { vehicle: Vehicle }) {
         </div>
       )}
 
-      {/* HISTORIQUE — interventions réellement effectuées (en premier) */}
+      {/* À PRÉVOIR — entretiens planifiés (devis) */}
       <div className="mb-3 flex items-center justify-between">
         <h2 className="flex items-center gap-2 text-sm font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-          <History size={16} /> Historique {services?.length ? `(${services.length})` : ''}
+          <CalendarClock size={16} /> À prévoir {planned.length ? `(${planned.length})` : ''}
         </h2>
-        <button className="btn-primary !px-3 !py-1.5" onClick={() => setAddingHistory(true)}>
+        <button className="btn-ghost !px-3 !py-1.5" onClick={() => setAddStatus('planned')}>
+          <Plus size={16} /> Devis
+        </button>
+      </div>
+      {planned.length === 0 ? (
+        <p className="mb-2 text-sm text-slate-400">
+          Aucun entretien prévu. Ajoutez un devis (ex. changement de pneus) pour le planifier — vous pourrez le passer en « réalisé » plus tard.
+        </p>
+      ) : (
+        <div className="space-y-2">
+          {planned.map((s) => (
+            <ServiceCard
+              key={s.id}
+              s={s}
+              docMap={docMap}
+              planned
+              onView={setViewDoc}
+              onEdit={() => setEditingHistory(s)}
+              onMarkDone={() => { setEditingHistory(s); setForceDone(true) }}
+              onDelete={() => deleteService(s)}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* HISTORIQUE — interventions réalisées */}
+      <div className="mb-3 mt-6 flex items-center justify-between">
+        <h2 className="flex items-center gap-2 text-sm font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+          <History size={16} /> Historique {done.length ? `(${done.length})` : ''}
+        </h2>
+        <button className="btn-primary !px-3 !py-1.5" onClick={() => setAddStatus('done')}>
           <Plus size={16} /> Ajouter
         </button>
       </div>
-
-      {!services?.length ? (
+      {done.length === 0 ? (
         <EmptyState
           icon={<History size={40} />}
           title="Aucun entretien enregistré"
@@ -69,56 +114,15 @@ export default function MaintenanceTab({ vehicle }: { vehicle: Vehicle }) {
         />
       ) : (
         <div className="space-y-2">
-          {services.map((s) => (
-            <div key={s.id} className="card flex items-start gap-3 p-3.5">
-              <div className="min-w-0 flex-1">
-                <p className="truncate font-semibold">{s.title}</p>
-                <p className="mt-0.5 text-xs text-slate-400">
-                  {formatDate(s.date)} · {formatKm(s.mileage)}
-                  {s.vendor ? ` · ${s.vendor}` : ''}
-                  {s.cost ? ` · ${formatMoney(s.cost)}` : ''}
-                </p>
-                {s.notes && <p className="mt-0.5 text-xs text-slate-400">{s.notes}</p>}
-                {!!s.documentIds?.length && (
-                  <div className="mt-2 flex flex-wrap gap-1.5">
-                    {s.documentIds.map((id) => {
-                      const d = docMap.get(id)
-                      if (!d) return null
-                      const pdf = isPdfDataUrl(d.dataUrl)
-                      return (
-                        <button
-                          key={id}
-                          onClick={() => (pdf ? openDataUrl(d.dataUrl) : setViewDoc(d))}
-                          className="flex items-center gap-1.5 rounded-lg bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-200 dark:bg-white/5 dark:text-slate-300 dark:hover:bg-white/10"
-                          title={d.title}
-                        >
-                          {pdf ? <FileText size={13} /> : <Paperclip size={13} />}
-                          <span className="max-w-[8rem] truncate">{d.title}</span>
-                        </button>
-                      )
-                    })}
-                  </div>
-                )}
-              </div>
-              <div className="flex shrink-0 items-center gap-1">
-                <button
-                  className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-white/10"
-                  onClick={() => setEditingHistory(s)}
-                  aria-label="Modifier"
-                >
-                  <Pencil size={15} />
-                </button>
-                <ConfirmButton
-                  label={<Trash2 size={15} />}
-                  className="rounded-lg p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10"
-                  confirmText="Supprimer cette intervention de l'historique ?"
-                  onConfirm={async () => {
-                    if (s.documentIds?.length) await db.documents.bulkDelete(s.documentIds)
-                    await db.services.delete(s.id!)
-                  }}
-                />
-              </div>
-            </div>
+          {done.map((s) => (
+            <ServiceCard
+              key={s.id}
+              s={s}
+              docMap={docMap}
+              onView={setViewDoc}
+              onEdit={() => setEditingHistory(s)}
+              onDelete={() => deleteService(s)}
+            />
           ))}
         </div>
       )}
@@ -196,15 +200,14 @@ export default function MaintenanceTab({ vehicle }: { vehicle: Vehicle }) {
         />
       )}
       {completing && <CompleteForm vehicle={vehicle} task={completing} onClose={() => setCompleting(null)} />}
-      {(addingHistory || editingHistory) && (
+      {(addStatus || editingHistory) && (
         <HistoryForm
           vehicle={vehicle}
           tasks={tasks}
           initial={editingHistory ?? undefined}
-          onClose={() => {
-            setAddingHistory(false)
-            setEditingHistory(null)
-          }}
+          defaultStatus={addStatus ?? undefined}
+          forceDone={forceDone}
+          onClose={closeForm}
         />
       )}
       {viewDoc && (
@@ -212,6 +215,81 @@ export default function MaintenanceTab({ vehicle }: { vehicle: Vehicle }) {
           <img src={viewDoc.dataUrl} alt={viewDoc.title} className="mx-auto max-h-[70vh] rounded-xl" />
         </Modal>
       )}
+    </div>
+  )
+}
+
+function ServiceCard({
+  s,
+  docMap,
+  planned,
+  onView,
+  onEdit,
+  onDelete,
+  onMarkDone,
+}: {
+  s: ServiceRecord
+  docMap: Map<number, DocumentBlob>
+  planned?: boolean
+  onView: (d: DocumentBlob) => void
+  onEdit: () => void
+  onDelete: () => void
+  onMarkDone?: () => void
+}) {
+  return (
+    <div className={`card flex items-start gap-3 p-3.5 ${planned ? 'border-l-4 border-amber-400' : ''}`}>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <p className="truncate font-semibold">{s.title}</p>
+          {planned && <span className="chip bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300">Devis</span>}
+        </div>
+        <p className="mt-0.5 text-xs text-slate-400">
+          {planned ? 'Prévu le ' : ''}
+          {formatDate(s.date)}
+          {s.mileage ? ` · ${formatKm(s.mileage)}` : ''}
+          {s.vendor ? ` · ${s.vendor}` : ''}
+          {s.cost ? ` · ${formatMoney(s.cost)}` : ''}
+        </p>
+        {s.notes && <p className="mt-0.5 text-xs text-slate-400">{s.notes}</p>}
+        {!!s.documentIds?.length && (
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {s.documentIds.map((id) => {
+              const d = docMap.get(id)
+              if (!d) return null
+              const pdf = isPdfDataUrl(d.dataUrl)
+              return (
+                <button
+                  key={id}
+                  onClick={() => (pdf ? openDataUrl(d.dataUrl) : onView(d))}
+                  className="flex items-center gap-1.5 rounded-lg bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-200 dark:bg-white/5 dark:text-slate-300 dark:hover:bg-white/10"
+                  title={d.title}
+                >
+                  {pdf ? <FileText size={13} /> : <Paperclip size={13} />}
+                  <span className="max-w-[8rem] truncate">{d.title}</span>
+                </button>
+              )
+            })}
+          </div>
+        )}
+      </div>
+      <div className="flex shrink-0 flex-col items-end gap-1">
+        {planned && onMarkDone && (
+          <button className="btn-primary !px-2.5 !py-1.5 text-xs" onClick={onMarkDone} title="Marquer comme réalisé">
+            <Check size={14} /> Fait
+          </button>
+        )}
+        <div className="flex gap-1">
+          <button className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-white/10" onClick={onEdit} aria-label="Modifier">
+            <Pencil size={15} />
+          </button>
+          <ConfirmButton
+            label={<Trash2 size={15} />}
+            className="rounded-lg p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10"
+            confirmText={planned ? 'Supprimer cet entretien prévu ?' : "Supprimer cette intervention de l'historique ?"}
+            onConfirm={onDelete}
+          />
+        </div>
+      </div>
     </div>
   )
 }
@@ -255,13 +333,21 @@ function HistoryForm({
   vehicle,
   tasks,
   initial,
+  defaultStatus,
+  forceDone,
   onClose,
 }: {
   vehicle: Vehicle
   tasks: MaintenanceTask[]
   initial?: ServiceRecord
+  defaultStatus?: 'planned' | 'done'
+  forceDone?: boolean
   onClose: () => void
 }) {
+  const [status, setStatus] = useState<'planned' | 'done'>(
+    forceDone ? 'done' : initial?.status ?? defaultStatus ?? 'done',
+  )
+  const isPlanned = status === 'planned'
   const [date, setDate] = useState(initial?.date ?? todayISO())
   const [mileage, setMileage] = useState(String(initial?.mileage ?? vehicle.currentMileage))
   const [title, setTitle] = useState(initial?.title ?? '')
@@ -309,7 +395,7 @@ function HistoryForm({
 
   const save = async () => {
     if (!title.trim()) {
-      setError("Indiquez l'intervention réalisée (ex. Vidange).")
+      setError("Indiquez l'intervention (ex. Vidange, Changement de pneus).")
       return
     }
     setSaving(true)
@@ -336,32 +422,30 @@ function HistoryForm({
         if (removed.length) await db.documents.bulkDelete(removed)
       }
       const documentIds = ids.length ? ids : undefined
+      const m = Number(mileage) || 0
+      const base = {
+        date,
+        mileage: m,
+        title: title.trim(),
+        taskId: tid,
+        cost: cost ? Number(cost) : undefined,
+        vendor: vendor.trim() || undefined,
+        notes: notes.trim() || undefined,
+        documentIds,
+      }
 
-      if (isEdit) {
-        await db.services.update(initial!.id!, {
-          date,
-          mileage: Number(mileage) || 0,
-          title: title.trim(),
-          taskId: tid,
-          cost: cost ? Number(cost) : undefined,
-          vendor: vendor.trim() || undefined,
-          notes: notes.trim() || undefined,
-          documentIds,
-        })
-        // si reliée à une tâche, on met à jour son dernier entretien
-        if (tid) await db.tasks.update(tid, { lastDoneDate: date, lastDoneKm: Number(mileage) || 0 })
+      if (isPlanned) {
+        // Entretien PRÉVU (devis) : aucun effet sur la tâche ni le kilométrage.
+        if (isEdit) await db.services.update(initial!.id!, { ...base, status: 'planned' })
+        else await db.services.add({ vehicleId: vehicle.id!, ...base, status: 'planned', createdAt: nowISO() })
+      } else if (isEdit) {
+        // Réalisé (modification ou conversion depuis un devis).
+        await db.services.update(initial!.id!, { ...base, status: 'done' })
+        if (tid) await db.tasks.update(tid, { lastDoneDate: date, lastDoneKm: m })
+        if (m > vehicle.currentMileage) await db.vehicles.update(vehicle.id!, { currentMileage: m, mileageDate: date })
       } else {
-        await completeTask({
-          vehicleId: vehicle.id!,
-          taskId: tid,
-          date,
-          mileage: Number(mileage) || 0,
-          title: title.trim(),
-          cost: cost ? Number(cost) : undefined,
-          vendor: vendor.trim() || undefined,
-          notes: notes.trim() || undefined,
-          documentIds,
-        })
+        // Réalisé (nouveau) : met à jour tâche + kilométrage via completeTask.
+        await completeTask({ vehicleId: vehicle.id!, ...base })
       }
       onClose()
     } catch (e) {
@@ -374,7 +458,7 @@ function HistoryForm({
     <Modal
       open
       onClose={onClose}
-      title={isEdit ? "Modifier l'intervention" : "Ajouter à l'historique"}
+      title={isEdit ? (isPlanned ? "Modifier l'entretien prévu" : "Modifier l'intervention") : isPlanned ? 'Entretien à prévoir' : "Ajouter à l'historique"}
       footer={
         <>
           <button className="btn-ghost" onClick={onClose}>Annuler</button>
@@ -382,7 +466,22 @@ function HistoryForm({
         </>
       }
     >
-      <Field label="Intervention réalisée">
+      <div className="mb-4 grid grid-cols-2 gap-2 rounded-xl bg-slate-100 p-1 dark:bg-white/5">
+        <button
+          onClick={() => setStatus('done')}
+          className={`rounded-lg py-2 text-sm font-semibold transition ${!isPlanned ? 'bg-brand-600 text-white' : 'text-slate-500'}`}
+        >
+          Réalisé
+        </button>
+        <button
+          onClick={() => setStatus('planned')}
+          className={`rounded-lg py-2 text-sm font-semibold transition ${isPlanned ? 'bg-amber-500 text-white' : 'text-slate-500'}`}
+        >
+          Prévu (devis)
+        </button>
+      </div>
+
+      <Field label={isPlanned ? 'Entretien prévu' : 'Intervention réalisée'}>
         <input className="input" value={title} onChange={(e) => { setTitle(e.target.value); setError('') }} placeholder="Ex. Remplacement plaquettes avant" autoFocus />
       </Field>
       {error && <p className="-mt-1 mb-2 text-sm font-medium text-red-600 dark:text-red-400">{error}</p>}
@@ -397,7 +496,7 @@ function HistoryForm({
         </Field>
       )}
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Date">
+        <Field label={isPlanned ? 'Date prévue' : 'Date'}>
           <input type="date" className="input" value={date} onChange={(e) => setDate(e.target.value)} />
         </Field>
         <Field label="Kilométrage">
@@ -405,7 +504,7 @@ function HistoryForm({
         </Field>
       </div>
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Coût (€)">
+        <Field label={isPlanned ? 'Coût estimé (€)' : 'Coût (€)'}>
           <input type="number" inputMode="decimal" className="input" value={cost} onChange={(e) => setCost(e.target.value)} placeholder="optionnel" />
         </Field>
         <Field label="Garage / prestataire">
@@ -416,7 +515,7 @@ function HistoryForm({
         <textarea className="input" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="optionnel" />
       </Field>
 
-      <Field label="Factures / documents" hint="Photo ou PDF — facture de l'entretien, bon de garage…">
+      <Field label={isPlanned ? 'Devis / documents' : 'Factures / documents'} hint={isPlanned ? 'Photo ou PDF — devis du garage…' : "Photo ou PDF — facture de l'entretien, bon de garage…"}>
         <div className="space-y-2">
           {attachments.map((a, i) => {
             const pdf = isPdfDataUrl(a.dataUrl)

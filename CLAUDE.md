@@ -95,6 +95,12 @@ React 18 + TypeScript + Vite 5 · Tailwind CSS v3 (`darkMode: 'class'`) · Dexie
   Estimation du km courant = dernier relevé + (km/an ÷ 365 × jours écoulés).
 - Les préréglages XC60 et délais CT sont des **valeurs par défaut paramétrables** (à ajuster
   selon motorisation/année).
+- **Interventions** (`ServiceRecord.status`) : `done` = réalisé (historique) ou `planned` =
+  prévu/devis (section « À prévoir », convertible en réalisé via « Fait »). On peut **joindre
+  des factures/devis** (photo compressée ou PDF) à chaque intervention (`documentIds` →
+  `documents`). L'onglet Entretien affiche : 3 prochaines maintenances suggérées, À prévoir,
+  Historique, puis Plan prévisionnel (déroulé). Relier une intervention à une tâche du plan
+  met à jour son échéance.
 
 ## En suspens / améliorations possibles
 
