@@ -45,6 +45,42 @@ export function fileToCompressedDataURL(file: File, maxSize = 1280, quality = 0.
   })
 }
 
+/** Lit un fichier tel quel en dataURL (sans transformation) — utilisé pour les PDF. */
+export function fileToDataURL(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onerror = () => reject(reader.error)
+    reader.onload = () => resolve(reader.result as string)
+    reader.readAsDataURL(file)
+  })
+}
+
+/** Prépare un fichier pour stockage : compresse les images, garde les PDF tels quels. */
+export async function fileToStorableDataURL(file: File): Promise<string> {
+  if (file.type === 'application/pdf') return fileToDataURL(file)
+  return fileToCompressedDataURL(file, 1600, 0.72)
+}
+
+export function isPdfDataUrl(dataUrl: string): boolean {
+  return dataUrl.startsWith('data:application/pdf')
+}
+
+/** Ouvre un document (image ou PDF) dans un nouvel onglet via une URL blob (fiable en PWA). */
+export function openDataUrl(dataUrl: string): void {
+  try {
+    const [meta, b64] = dataUrl.split(',')
+    const mime = meta.match(/data:([^;]+)/)?.[1] || 'application/octet-stream'
+    const bin = atob(b64)
+    const bytes = new Uint8Array(bin.length)
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+    const url = URL.createObjectURL(new Blob([bytes], { type: mime }))
+    window.open(url, '_blank')
+    setTimeout(() => URL.revokeObjectURL(url), 30000)
+  } catch {
+    window.open(dataUrl, '_blank')
+  }
+}
+
 export function pickFile(accept: string): Promise<File | null> {
   return new Promise((resolve) => {
     const input = document.createElement('input')

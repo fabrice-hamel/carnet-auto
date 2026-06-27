@@ -1,13 +1,14 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { Plus, Pencil, Check, History, Trash2, ChevronDown, Wrench } from 'lucide-react'
+import { Plus, Pencil, Check, History, Trash2, ChevronDown, Wrench, Paperclip, FileText, X } from 'lucide-react'
 import { db } from '../../db/db'
 import { completeTask } from '../../db/repo'
-import type { MaintenanceTask, ServiceRecord, Settings, Vehicle } from '../../db/types'
+import type { DocumentBlob, MaintenanceTask, ServiceRecord, Settings, Vehicle } from '../../db/types'
 import { computeTask, type TaskComputed, type Urgency } from '../../lib/scheduling'
 import { useSettings } from '../../lib/useSettings'
 import { Modal, Field, StatusBadge, EmptyState, ConfirmButton, urgencyDot } from '../ui'
 import { formatKm, formatDate, todayISO, nowISO, formatMoney } from '../../lib/format'
+import { fileToStorableDataURL, isPdfDataUrl, openDataUrl, pickFile } from '../../lib/files'
 import { MAINTENANCE_CATEGORIES } from '../../lib/presets'
 
 export default function MaintenanceTab({ vehicle }: { vehicle: Vehicle }) {
@@ -17,6 +18,9 @@ export default function MaintenanceTab({ vehicle }: { vehicle: Vehicle }) {
     () => db.services.where('vehicleId').equals(vehicle.id!).reverse().sortBy('date'),
     [vehicle.id],
   )
+  const documents = useLiveQuery(() => db.documents.where('vehicleId').equals(vehicle.id!).toArray(), [vehicle.id])
+  const docMap = new Map((documents ?? []).map((d) => [d.id!, d]))
+  const [viewDoc, setViewDoc] = useState<DocumentBlob | null>(null)
   const [editTask, setEditTask] = useState<MaintenanceTask | null>(null)
   const [adding, setAdding] = useState(false)
   const [completing, setCompleting] = useState<MaintenanceTask | null>(null)
@@ -26,18 +30,24 @@ export default function MaintenanceTab({ vehicle }: { vehicle: Vehicle }) {
 
   if (!tasks) return null
 
-  const suggestion = nextSuggestion(tasks, vehicle, settings)
+  const suggestions = topSuggestions(tasks, vehicle, settings, 3)
 
   return (
     <div>
-      {/* PROCHAINE MAINTENANCE — proposée d'après l'historique + le plan */}
-      {suggestion && (
-        <div className={`mb-4 rounded-2xl border-l-4 p-3.5 shadow-sm ring-1 ${suggestionTint(suggestion.urgency)}`}>
-          <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-            <Wrench size={14} /> Prochaine maintenance
+      {/* PROCHAINES MAINTENANCES — proposées d'après l'historique + le plan */}
+      {suggestions.length > 0 && (
+        <div className="mb-4">
+          <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+            <Wrench size={14} /> Prochaines maintenances
           </p>
-          <p className="mt-1 font-semibold">{suggestion.task.title}</p>
-          <p className="text-sm text-slate-600 dark:text-slate-300">{dueText(suggestion.computed)}</p>
+          <div className="space-y-2">
+            {suggestions.map((s) => (
+              <div key={s.task.id} className={`rounded-2xl border-l-4 p-3 shadow-sm ring-1 ${suggestionTint(s.urgency)}`}>
+                <p className="font-semibold">{s.task.title}</p>
+                <p className="text-sm text-slate-600 dark:text-slate-300">{dueText(s.computed)}</p>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -60,7 +70,7 @@ export default function MaintenanceTab({ vehicle }: { vehicle: Vehicle }) {
       ) : (
         <div className="space-y-2">
           {services.map((s) => (
-            <div key={s.id} className="card flex items-center gap-3 p-3.5">
+            <div key={s.id} className="card flex items-start gap-3 p-3.5">
               <div className="min-w-0 flex-1">
                 <p className="truncate font-semibold">{s.title}</p>
                 <p className="mt-0.5 text-xs text-slate-400">
@@ -69,6 +79,26 @@ export default function MaintenanceTab({ vehicle }: { vehicle: Vehicle }) {
                   {s.cost ? ` · ${formatMoney(s.cost)}` : ''}
                 </p>
                 {s.notes && <p className="mt-0.5 text-xs text-slate-400">{s.notes}</p>}
+                {!!s.documentIds?.length && (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {s.documentIds.map((id) => {
+                      const d = docMap.get(id)
+                      if (!d) return null
+                      const pdf = isPdfDataUrl(d.dataUrl)
+                      return (
+                        <button
+                          key={id}
+                          onClick={() => (pdf ? openDataUrl(d.dataUrl) : setViewDoc(d))}
+                          className="flex items-center gap-1.5 rounded-lg bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-200 dark:bg-white/5 dark:text-slate-300 dark:hover:bg-white/10"
+                          title={d.title}
+                        >
+                          {pdf ? <FileText size={13} /> : <Paperclip size={13} />}
+                          <span className="max-w-[8rem] truncate">{d.title}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
               </div>
               <div className="flex shrink-0 items-center gap-1">
                 <button
@@ -82,7 +112,10 @@ export default function MaintenanceTab({ vehicle }: { vehicle: Vehicle }) {
                   label={<Trash2 size={15} />}
                   className="rounded-lg p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10"
                   confirmText="Supprimer cette intervention de l'historique ?"
-                  onConfirm={() => db.services.delete(s.id!)}
+                  onConfirm={async () => {
+                    if (s.documentIds?.length) await db.documents.bulkDelete(s.documentIds)
+                    await db.services.delete(s.id!)
+                  }}
                 />
               </div>
             </div>
@@ -174,17 +207,23 @@ export default function MaintenanceTab({ vehicle }: { vehicle: Vehicle }) {
           }}
         />
       )}
+      {viewDoc && (
+        <Modal open onClose={() => setViewDoc(null)} title={viewDoc.title}>
+          <img src={viewDoc.dataUrl} alt={viewDoc.title} className="mx-auto max-h-[70vh] rounded-xl" />
+        </Modal>
+      )}
     </div>
   )
 }
 
-/** Propose la prochaine maintenance : la tâche du plan dont l'échéance (km/temps) est la plus proche. */
-function nextSuggestion(
+/** Propose les prochaines maintenances : tâches du plan triées par échéance (km/temps) la plus proche. */
+function topSuggestions(
   tasks: MaintenanceTask[],
   vehicle: Vehicle,
   settings: Settings,
-): { task: MaintenanceTask; computed: TaskComputed; urgency: Urgency } | null {
-  let best: { task: MaintenanceTask; computed: TaskComputed; key: number; urgency: Urgency } | null = null
+  n: number,
+): { task: MaintenanceTask; computed: TaskComputed; urgency: Urgency }[] {
+  const items: { task: MaintenanceTask; computed: TaskComputed; urgency: Urgency; key: number }[] = []
   for (const t of tasks) {
     if (!t.active) continue
     const c = computeTask(t, vehicle, settings)
@@ -195,9 +234,10 @@ function nextSuggestion(
         ? (c.kmRemaining / vehicle.avgKmPerYear) * 365
         : undefined
     const key = Math.min(c.daysRemaining ?? Infinity, kmDays ?? Infinity)
-    if (best === null || key < best.key) best = { task: t, computed: c, key, urgency: c.urgency }
+    items.push({ task: t, computed: c, urgency: c.urgency, key })
   }
-  return best ? { task: best.task, computed: best.computed, urgency: best.urgency } : null
+  items.sort((a, b) => a.key - b.key)
+  return items.slice(0, n).map(({ task, computed, urgency }) => ({ task, computed, urgency }))
 }
 
 function suggestionTint(urgency: Urgency): string {
@@ -231,7 +271,32 @@ function HistoryForm({
   const [notes, setNotes] = useState(initial?.notes ?? '')
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [attachments, setAttachments] = useState<{ id?: number; dataUrl: string; title: string }[]>([])
   const isEdit = !!initial?.id
+
+  // Charge les pièces jointes existantes (en modification)
+  useEffect(() => {
+    if (initial?.documentIds?.length) {
+      db.documents.bulkGet(initial.documentIds).then((docs) => {
+        setAttachments(docs.filter(Boolean).map((d) => ({ id: d!.id, dataUrl: d!.dataUrl, title: d!.title })))
+      })
+    }
+  }, [initial])
+
+  const addAttachment = async () => {
+    const file = await pickFile('image/*,application/pdf')
+    if (!file) return
+    setBusy(true)
+    try {
+      const dataUrl = await fileToStorableDataURL(file)
+      setAttachments((a) => [...a, { dataUrl, title: file.name.replace(/\.[^.]+$/, '') }])
+    } catch (e) {
+      setError('Fichier illisible : ' + (e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
 
   // Si on choisit une tâche et que le titre est vide, on reprend le nom de la tâche.
   const onPickTask = (val: string) => {
@@ -250,6 +315,28 @@ function HistoryForm({
     setSaving(true)
     const tid = taskId ? Number(taskId) : undefined
     try {
+      // Persiste les pièces jointes : ajoute les nouvelles, supprime celles retirées.
+      const ids: number[] = []
+      for (const a of attachments) {
+        if (a.id) ids.push(a.id)
+        else {
+          const newId = await db.documents.add({
+            vehicleId: vehicle.id!,
+            type: 'facture',
+            title: a.title || 'Facture',
+            date,
+            dataUrl: a.dataUrl,
+            createdAt: nowISO(),
+          })
+          ids.push(newId)
+        }
+      }
+      if (isEdit && initial?.documentIds?.length) {
+        const removed = initial.documentIds.filter((id) => !ids.includes(id))
+        if (removed.length) await db.documents.bulkDelete(removed)
+      }
+      const documentIds = ids.length ? ids : undefined
+
       if (isEdit) {
         await db.services.update(initial!.id!, {
           date,
@@ -259,6 +346,7 @@ function HistoryForm({
           cost: cost ? Number(cost) : undefined,
           vendor: vendor.trim() || undefined,
           notes: notes.trim() || undefined,
+          documentIds,
         })
         // si reliée à une tâche, on met à jour son dernier entretien
         if (tid) await db.tasks.update(tid, { lastDoneDate: date, lastDoneKm: Number(mileage) || 0 })
@@ -272,6 +360,7 @@ function HistoryForm({
           cost: cost ? Number(cost) : undefined,
           vendor: vendor.trim() || undefined,
           notes: notes.trim() || undefined,
+          documentIds,
         })
       }
       onClose()
@@ -326,6 +415,37 @@ function HistoryForm({
       <Field label="Notes">
         <textarea className="input" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="optionnel" />
       </Field>
+
+      <Field label="Factures / documents" hint="Photo ou PDF — facture de l'entretien, bon de garage…">
+        <div className="space-y-2">
+          {attachments.map((a, i) => {
+            const pdf = isPdfDataUrl(a.dataUrl)
+            return (
+              <div key={i} className="flex items-center gap-2 rounded-xl bg-slate-100 p-2 dark:bg-white/5">
+                {pdf ? (
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-red-100 text-red-600 dark:bg-red-500/15">
+                    <FileText size={18} />
+                  </span>
+                ) : (
+                  <img src={a.dataUrl} alt="" className="h-10 w-10 shrink-0 rounded-lg object-cover" />
+                )}
+                <span className="min-w-0 flex-1 truncate text-sm">{a.title}{pdf ? ' (PDF)' : ''}</span>
+                <button
+                  className="rounded-lg p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10"
+                  onClick={() => setAttachments((arr) => arr.filter((_, idx) => idx !== i))}
+                  aria-label="Retirer"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            )
+          })}
+          <button className="btn-ghost w-full" onClick={addAttachment} disabled={busy}>
+            <Paperclip size={16} /> {busy ? 'Chargement…' : 'Ajouter une facture / un document'}
+          </button>
+        </div>
+      </Field>
+
       <p className="text-xs text-slate-400">
         Reliez l'intervention à une tâche du plan pour que l'app propose automatiquement la prochaine échéance.
       </p>

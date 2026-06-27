@@ -69,6 +69,7 @@ export async function completeTask(params: {
   cost?: number
   vendor?: string
   notes?: string
+  documentIds?: number[]
 }): Promise<void> {
   await db.transaction('rw', [db.services, db.tasks, db.vehicles], async () => {
     await db.services.add({
@@ -80,6 +81,7 @@ export async function completeTask(params: {
       cost: params.cost,
       vendor: params.vendor,
       notes: params.notes,
+      documentIds: params.documentIds,
       createdAt: nowISO(),
     })
     if (params.taskId) {
