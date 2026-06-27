@@ -176,7 +176,7 @@ export default function MaintenanceTab({ vehicle }: { vehicle: Vehicle }) {
                       </div>
                       <div className="flex flex-col gap-1">
                         <button className="btn-primary !px-2.5 !py-1.5 text-xs" onClick={() => setCompleting(t)} title="Marquer comme fait">
-                          <Check size={14} /> Fait
+                          <Check size={14} /> Marquer fait
                         </button>
                         <button className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-white/10" onClick={() => setEditTask(t)} aria-label="Modifier">
                           <Pencil size={14} />
@@ -275,7 +275,7 @@ function ServiceCard({
       <div className="flex shrink-0 flex-col items-end gap-1">
         {planned && onMarkDone && (
           <button className="btn-primary !px-2.5 !py-1.5 text-xs" onClick={onMarkDone} title="Marquer comme réalisé">
-            <Check size={14} /> Fait
+            <Check size={14} /> Marquer fait
           </button>
         )}
         <div className="flex gap-1">
