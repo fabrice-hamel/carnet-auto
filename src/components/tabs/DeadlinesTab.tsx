@@ -76,7 +76,7 @@ export function DeadlinesSection({ vehicle }: { vehicle: Vehicle }) {
                   </div>
                   <div className="flex flex-col gap-1">
                     <button className="btn-primary !px-2.5 !py-1.5 text-xs" onClick={() => setValidating(d)} title="Enregistrer comme réalisé (coût, document) et reporter">
-                      <Check size={14} /> Valider
+                      <Check size={14} /> Marquer réalisé
                     </button>
                     <div className="flex gap-1">
                       <button className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-white/10" onClick={() => exportOne(d)} aria-label="Calendrier">

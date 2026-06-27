@@ -84,12 +84,20 @@ export default function MaintenanceTab({ vehicle }: { vehicle: Vehicle }) {
                     <p className="text-sm text-slate-600 dark:text-slate-300">{dueText(s.computed)}</p>
                   </div>
                   <div className="flex shrink-0 flex-col items-end gap-1">
-                    <button className="btn-ghost !px-2.5 !py-1.5 text-xs" onClick={() => planFromSuggestion(s)} title="Créer un devis / planifier">
-                      <Plus size={14} /> Devis
-                    </button>
                     <button className="btn-primary !px-2.5 !py-1.5 text-xs" onClick={() => doneFromSuggestion(s)} title="Enregistrer comme réalisé">
-                      <Check size={14} /> Réalisé
+                      <Check size={14} /> Marquer réalisé
                     </button>
+                    <div className="flex gap-1">
+                      <button className="btn-ghost !px-2.5 !py-1.5 text-xs" onClick={() => planFromSuggestion(s)} title="Créer un devis / planifier">
+                        <Plus size={14} /> Devis
+                      </button>
+                      <ConfirmButton
+                        label={<Trash2 size={14} />}
+                        className="rounded-lg p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10"
+                        confirmText={`Supprimer la tâche « ${s.task.title} » du plan ? Elle n'apparaîtra plus dans les maintenances ni le plan prévisionnel.`}
+                        onConfirm={() => db.tasks.delete(s.task.id!)}
+                      />
+                    </div>
                   </div>
                 </div>
               </div>
@@ -211,8 +219,8 @@ export default function MaintenanceTab({ vehicle }: { vehicle: Vehicle }) {
                         )}
                       </div>
                       <div className="flex flex-col gap-1">
-                        <button className="btn-primary !px-2.5 !py-1.5 text-xs" onClick={() => setCompleting(t)} title="Marquer comme fait">
-                          <Check size={14} /> Marquer fait
+                        <button className="btn-primary !px-2.5 !py-1.5 text-xs" onClick={() => setCompleting(t)} title="Marquer comme réalisé">
+                          <Check size={14} /> Marquer réalisé
                         </button>
                         <button className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-white/10" onClick={() => setEditTask(t)} aria-label="Modifier">
                           <Pencil size={14} />
