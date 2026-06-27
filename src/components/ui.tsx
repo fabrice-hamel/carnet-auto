@@ -39,7 +39,11 @@ export function Modal({
           </button>
         </div>
         {children}
-        {footer && <div className="mt-5 flex justify-end gap-2">{footer}</div>}
+        {footer && (
+          <div className="sticky bottom-0 -mx-5 -mb-5 mt-5 flex justify-end gap-2 border-t border-slate-100 bg-white px-5 py-3 dark:border-white/10 dark:bg-brand-900">
+            {footer}
+          </div>
+        )}
       </div>
     </div>
   )

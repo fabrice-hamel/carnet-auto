@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { Plus, Pencil, Check, History, Trash2 } from 'lucide-react'
+import { Plus, Pencil, Check, History, Trash2, ChevronDown } from 'lucide-react'
 import { db } from '../../db/db'
 import { completeTask } from '../../db/repo'
 import type { MaintenanceTask, Vehicle } from '../../db/types'
@@ -20,99 +20,114 @@ export default function MaintenanceTab({ vehicle }: { vehicle: Vehicle }) {
   const [editTask, setEditTask] = useState<MaintenanceTask | null>(null)
   const [adding, setAdding] = useState(false)
   const [completing, setCompleting] = useState<MaintenanceTask | null>(null)
-  const [showHistory, setShowHistory] = useState(false)
+  const [showPlan, setShowPlan] = useState(true)
   const [addingHistory, setAddingHistory] = useState(false)
 
   if (!tasks) return null
 
   return (
     <div>
+      {/* HISTORIQUE — interventions réellement effectuées (en premier) */}
       <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-sm font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Plan d'entretien</h2>
+        <h2 className="flex items-center gap-2 text-sm font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+          <History size={16} /> Historique {services?.length ? `(${services.length})` : ''}
+        </h2>
+        <button className="btn-primary !px-3 !py-1.5" onClick={() => setAddingHistory(true)}>
+          <Plus size={16} /> Ajouter
+        </button>
+      </div>
+
+      {!services?.length ? (
+        <EmptyState
+          icon={<History size={40} />}
+          title="Aucun entretien enregistré"
+          hint="Ajoutez les entretiens déjà réalisés (avant l'achat ou récents) pour bâtir l'historique du véhicule."
+        />
+      ) : (
+        <div className="space-y-2">
+          {services.map((s) => (
+            <div key={s.id} className="card flex items-center gap-3 p-3.5">
+              <div className="min-w-0 flex-1">
+                <p className="truncate font-semibold">{s.title}</p>
+                <p className="mt-0.5 text-xs text-slate-400">
+                  {formatDate(s.date)} · {formatKm(s.mileage)}
+                  {s.vendor ? ` · ${s.vendor}` : ''}
+                  {s.cost ? ` · ${formatMoney(s.cost)}` : ''}
+                </p>
+                {s.notes && <p className="mt-0.5 text-xs text-slate-400">{s.notes}</p>}
+              </div>
+              <ConfirmButton
+                label={<Trash2 size={15} />}
+                className="rounded-lg p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10"
+                confirmText="Supprimer cette intervention de l'historique ?"
+                onConfirm={() => db.services.delete(s.id!)}
+              />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* PLAN D'ENTRETIEN PRÉVISIONNEL — échéances théoriques (déroulé) */}
+      <div className="mt-8 flex items-center justify-between">
+        <button
+          onClick={() => setShowPlan((s) => !s)}
+          className="flex items-center gap-1.5 text-sm font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400"
+        >
+          <ChevronDown size={18} className={`transition ${showPlan ? '' : '-rotate-90'}`} />
+          Plan prévisionnel {tasks.length ? `(${tasks.length})` : ''}
+        </button>
         <button className="btn-ghost !px-3 !py-1.5" onClick={() => setAdding(true)}>
           <Plus size={16} /> Tâche
         </button>
       </div>
+      <p className="mt-1 text-xs text-slate-400">
+        Échéances théoriques (km et/ou temps) pour anticiper vos prochains entretiens. Bouton « Fait » = ajoute à l'historique et décale l'échéance.
+      </p>
 
-      {tasks.length === 0 ? (
-        <EmptyState icon={<Plus size={40} />} title="Aucune tâche d'entretien" hint="Ajoutez une tâche (vidange, freins…) avec sa périodicité en km et/ou en mois." />
-      ) : (
-        <div className="space-y-2">
-          {tasks
-            .slice()
-            .sort((a, b) => Number(b.active) - Number(a.active))
-            .map((t) => {
-              const c = computeTask(t, vehicle, settings)
-              return (
-                <div key={t.id} className={`card p-3.5 ${!t.active ? 'opacity-50' : ''}`}>
-                  <div className="flex items-start gap-3">
-                    <span className={`mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full ${urgencyDot(c.urgency)}`} />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <p className="font-semibold">{t.title}</p>
-                        <StatusBadge urgency={c.urgency} />
+      {showPlan &&
+        (tasks.length === 0 ? (
+          <div className="mt-3">
+            <EmptyState icon={<Plus size={40} />} title="Aucune tâche planifiée" hint="Ajoutez une tâche (vidange, freins…) avec sa périodicité en km et/ou en mois." />
+          </div>
+        ) : (
+          <div className="mt-3 space-y-2">
+            {tasks
+              .slice()
+              .sort((a, b) => Number(b.active) - Number(a.active))
+              .map((t) => {
+                const c = computeTask(t, vehicle, settings)
+                return (
+                  <div key={t.id} className={`card p-3.5 ${!t.active ? 'opacity-50' : ''}`}>
+                    <div className="flex items-start gap-3">
+                      <span className={`mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full ${urgencyDot(c.urgency)}`} />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <p className="font-semibold">{t.title}</p>
+                          <StatusBadge urgency={c.urgency} />
+                        </div>
+                        <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{intervalText(t)}</p>
+                        <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">{dueText(c)}</p>
+                        {(t.lastDoneDate || t.lastDoneKm !== undefined) && (
+                          <p className="mt-0.5 text-xs text-slate-400">
+                            Dernier : {t.lastDoneDate ? formatDate(t.lastDoneDate) : '—'}
+                            {t.lastDoneKm !== undefined ? ` · ${formatKm(t.lastDoneKm)}` : ''}
+                          </p>
+                        )}
                       </div>
-                      <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-                        {intervalText(t)}
-                      </p>
-                      <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">{dueText(c)}</p>
-                      {(t.lastDoneDate || t.lastDoneKm !== undefined) && (
-                        <p className="mt-0.5 text-xs text-slate-400">
-                          Dernier : {t.lastDoneDate ? formatDate(t.lastDoneDate) : '—'}
-                          {t.lastDoneKm !== undefined ? ` · ${formatKm(t.lastDoneKm)}` : ''}
-                        </p>
-                      )}
-                    </div>
-                    <div className="flex flex-col gap-1">
-                      <button className="btn-primary !px-2.5 !py-1.5 text-xs" onClick={() => setCompleting(t)} title="Marquer comme fait">
-                        <Check size={14} /> Fait
-                      </button>
-                      <button className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-white/10" onClick={() => setEditTask(t)} aria-label="Modifier">
-                        <Pencil size={14} />
-                      </button>
+                      <div className="flex flex-col gap-1">
+                        <button className="btn-primary !px-2.5 !py-1.5 text-xs" onClick={() => setCompleting(t)} title="Marquer comme fait">
+                          <Check size={14} /> Fait
+                        </button>
+                        <button className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-white/10" onClick={() => setEditTask(t)} aria-label="Modifier">
+                          <Pencil size={14} />
+                        </button>
+                      </div>
                     </div>
                   </div>
-                </div>
-              )
-            })}
-        </div>
-      )}
-
-      {/* Historique des interventions */}
-      <div className="mt-6 flex items-center justify-between">
-        <button onClick={() => setShowHistory((s) => !s)} className="flex items-center gap-2 text-sm font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-          <History size={16} /> Historique {services?.length ? `(${services.length})` : ''}
-        </button>
-        <button className="btn-ghost !px-3 !py-1.5" onClick={() => { setShowHistory(true); setAddingHistory(true) }}>
-          <Plus size={16} /> Intervention
-        </button>
-      </div>
-      {showHistory && (
-        <div className="mt-3 space-y-2">
-          {!services?.length ? (
-            <p className="text-sm text-slate-400">Aucune intervention enregistrée.</p>
-          ) : (
-            services.map((s) => (
-              <div key={s.id} className="card flex items-center gap-3 p-3">
-                <div className="min-w-0 flex-1">
-                  <p className="truncate font-medium">{s.title}</p>
-                  <p className="text-xs text-slate-400">
-                    {formatDate(s.date)} · {formatKm(s.mileage)}
-                    {s.vendor ? ` · ${s.vendor}` : ''}
-                    {s.cost ? ` · ${formatMoney(s.cost)}` : ''}
-                  </p>
-                </div>
-                <ConfirmButton
-                  label={<Trash2 size={14} />}
-                  className="rounded-lg p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10"
-                  confirmText="Supprimer cette intervention ?"
-                  onConfirm={() => db.services.delete(s.id!)}
-                />
-              </div>
-            ))
-          )}
-        </div>
-      )}
+                )
+              })}
+          </div>
+        ))}
 
       {(adding || editTask) && (
         <TaskForm
@@ -137,19 +152,30 @@ function HistoryForm({ vehicle, onClose }: { vehicle: Vehicle; onClose: () => vo
   const [cost, setCost] = useState('')
   const [vendor, setVendor] = useState('')
   const [notes, setNotes] = useState('')
+  const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
 
   const save = async () => {
-    if (!title.trim()) return window.alert("Indiquez l'intervention réalisée.")
-    await completeTask({
-      vehicleId: vehicle.id!,
-      date,
-      mileage: Number(mileage) || 0,
-      title: title.trim(),
-      cost: cost ? Number(cost) : undefined,
-      vendor: vendor.trim() || undefined,
-      notes: notes.trim() || undefined,
-    })
-    onClose()
+    if (!title.trim()) {
+      setError("Indiquez l'intervention réalisée (ex. Vidange).")
+      return
+    }
+    setSaving(true)
+    try {
+      await completeTask({
+        vehicleId: vehicle.id!,
+        date,
+        mileage: Number(mileage) || 0,
+        title: title.trim(),
+        cost: cost ? Number(cost) : undefined,
+        vendor: vendor.trim() || undefined,
+        notes: notes.trim() || undefined,
+      })
+      onClose()
+    } catch (e) {
+      setError('Erreur lors de l’enregistrement : ' + (e as Error).message)
+      setSaving(false)
+    }
   }
 
   return (
@@ -160,13 +186,14 @@ function HistoryForm({ vehicle, onClose }: { vehicle: Vehicle; onClose: () => vo
       footer={
         <>
           <button className="btn-ghost" onClick={onClose}>Annuler</button>
-          <button className="btn-primary" onClick={save}>Enregistrer</button>
+          <button className="btn-primary" onClick={save} disabled={saving}>{saving ? 'Enregistrement…' : 'Enregistrer'}</button>
         </>
       }
     >
       <Field label="Intervention réalisée">
-        <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Ex. Remplacement plaquettes avant" autoFocus />
+        <input className="input" value={title} onChange={(e) => { setTitle(e.target.value); setError('') }} placeholder="Ex. Remplacement plaquettes avant" autoFocus />
       </Field>
+      {error && <p className="-mt-1 mb-2 text-sm font-medium text-red-600 dark:text-red-400">{error}</p>}
       <div className="grid grid-cols-2 gap-3">
         <Field label="Date">
           <input type="date" className="input" value={date} onChange={(e) => setDate(e.target.value)} />
