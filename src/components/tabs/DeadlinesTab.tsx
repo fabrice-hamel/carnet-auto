@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { Plus, Pencil, CalendarPlus, Check, ShieldCheck } from 'lucide-react'
+import { Plus, Pencil, CalendarPlus, Check, ShieldCheck, FileText, Paperclip, X } from 'lucide-react'
 import { addMonths, format, parseISO } from 'date-fns'
 import { db } from '../../db/db'
 import { validateCT } from '../../db/repo'
@@ -10,7 +10,7 @@ import { useSettings } from '../../lib/useSettings'
 import { Modal, Field, StatusBadge, ConfirmButton, urgencyDot } from '../ui'
 import { formatDate, todayISO, nowISO } from '../../lib/format'
 import { generateICS } from '../../lib/ics'
-import { downloadText } from '../../lib/files'
+import { downloadText, fileToStorableDataURL, isPdfDataUrl, pickFile } from '../../lib/files'
 
 const TYPES: { value: DeadlineType; label: string; recurrence?: number }[] = [
   { value: 'controle_technique', label: 'Contrôle technique', recurrence: 24 },
@@ -28,7 +28,7 @@ export function DeadlinesSection({ vehicle }: { vehicle: Vehicle }) {
   )
   const [editing, setEditing] = useState<Deadline | null>(null)
   const [adding, setAdding] = useState(false)
-  const [validatingCT, setValidatingCT] = useState<Deadline | null>(null)
+  const [validating, setValidating] = useState<Deadline | null>(null)
   if (!deadlines) return null
 
   const exportOne = (d: Deadline) => {
@@ -37,16 +37,6 @@ export function DeadlinesSection({ vehicle }: { vehicle: Vehicle }) {
       generateICS([{ uid: `deadline-${d.id}`, title: `${d.title} — ${vehicle.name}`, date: d.dueDate, description: d.notes, alarmDaysBefore: 14 }]),
       'text/calendar',
     )
-  }
-
-  const markDone = async (d: Deadline) => {
-    if (d.type === 'controle_technique') {
-      setValidatingCT(d)
-    } else if (d.recurrenceMonths) {
-      await db.deadlines.update(d.id!, { dueDate: format(addMonths(parseISO(d.dueDate), d.recurrenceMonths), 'yyyy-MM-dd') })
-    } else {
-      window.alert('Échéance ponctuelle : modifiez la date manuellement.')
-    }
   }
 
   return (
@@ -85,8 +75,8 @@ export function DeadlinesSection({ vehicle }: { vehicle: Vehicle }) {
                     {d.notes && !isCT && <p className="mt-0.5 text-xs text-slate-400">{d.notes}</p>}
                   </div>
                   <div className="flex flex-col gap-1">
-                    <button className="btn-primary !px-2.5 !py-1.5 text-xs" onClick={() => markDone(d)} title={isCT ? 'CT validé → +2 ans' : 'Renouveler'}>
-                      <Check size={14} /> {isCT ? 'Validé' : 'Fait'}
+                    <button className="btn-primary !px-2.5 !py-1.5 text-xs" onClick={() => setValidating(d)} title="Enregistrer comme réalisé (coût, document) et reporter">
+                      <Check size={14} /> Valider
                     </button>
                     <div className="flex gap-1">
                       <button className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-white/10" onClick={() => exportOne(d)} aria-label="Calendrier">
@@ -105,33 +95,122 @@ export function DeadlinesSection({ vehicle }: { vehicle: Vehicle }) {
       )}
 
       {(adding || editing) && <DeadlineForm vehicleId={vehicle.id!} initial={editing ?? undefined} onClose={() => { setAdding(false); setEditing(null) }} />}
-      {validatingCT && <CTValidateForm deadline={validatingCT} onClose={() => setValidatingCT(null)} />}
+      {validating && <ValidateDeadlineForm vehicle={vehicle} deadline={validating} onClose={() => setValidating(null)} />}
     </div>
   )
 }
 
-function CTValidateForm({ deadline, onClose }: { deadline: Deadline; onClose: () => void }) {
+/** Valide une échéance administrative : enregistre le coût + document dans l'historique/dépenses, puis reporte la date. */
+function ValidateDeadlineForm({ vehicle, deadline, onClose }: { vehicle: Vehicle; deadline: Deadline; onClose: () => void }) {
+  const isCT = deadline.type === 'controle_technique'
   const [date, setDate] = useState(todayISO())
-  const save = async () => {
-    await validateCT(deadline.id!, date)
-    onClose()
+  const [cost, setCost] = useState('')
+  const [vendor, setVendor] = useState('')
+  const [attachments, setAttachments] = useState<{ dataUrl: string; title: string }[]>([])
+  const [busy, setBusy] = useState(false)
+  const [saving, setSaving] = useState(false)
+
+  const addAttachment = async () => {
+    const file = await pickFile('image/*,application/pdf')
+    if (!file) return
+    setBusy(true)
+    try {
+      const dataUrl = await fileToStorableDataURL(file)
+      setAttachments((a) => [...a, { dataUrl, title: file.name.replace(/\.[^.]+$/, '') }])
+    } finally {
+      setBusy(false)
+    }
   }
+
+  const save = async () => {
+    setSaving(true)
+    try {
+      // pièces jointes (rapport CT, attestation…)
+      const ids: number[] = []
+      for (const a of attachments) {
+        const id = await db.documents.add({
+          vehicleId: vehicle.id!,
+          type: isCT ? 'controle_technique' : 'autre',
+          title: a.title || deadline.title,
+          date,
+          dataUrl: a.dataUrl,
+          createdAt: nowISO(),
+        })
+        ids.push(id)
+      }
+      // trace dans l'historique (et donc dans les dépenses si coût)
+      await db.services.add({
+        vehicleId: vehicle.id!,
+        status: 'done',
+        date,
+        mileage: vehicle.currentMileage,
+        title: deadline.title,
+        cost: cost ? Number(cost) : undefined,
+        vendor: vendor.trim() || undefined,
+        documentIds: ids.length ? ids : undefined,
+        createdAt: nowISO(),
+      })
+      // report de l'échéance
+      if (isCT) {
+        await validateCT(deadline.id!, date)
+      } else if (deadline.recurrenceMonths) {
+        await db.deadlines.update(deadline.id!, {
+          dueDate: format(addMonths(parseISO(date), deadline.recurrenceMonths), 'yyyy-MM-dd'),
+        })
+      }
+      onClose()
+    } finally {
+      setSaving(false)
+    }
+  }
+
   return (
     <Modal
       open
       onClose={onClose}
-      title="Contrôle technique validé"
+      title={`${deadline.title} — réalisé`}
       footer={
         <>
           <button className="btn-ghost" onClick={onClose}>Annuler</button>
-          <button className="btn-primary" onClick={save}>Valider</button>
+          <button className="btn-primary" onClick={save} disabled={saving}>{saving ? 'Enregistrement…' : 'Valider'}</button>
         </>
       }
     >
-      <Field label="Date du contrôle technique réalisé">
-        <input type="date" className="input" value={date} onChange={(e) => setDate(e.target.value)} autoFocus />
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Date réalisée">
+          <input type="date" className="input" value={date} onChange={(e) => setDate(e.target.value)} autoFocus />
+        </Field>
+        <Field label="Coût (€)">
+          <input type="number" inputMode="decimal" className="input" value={cost} onChange={(e) => setCost(e.target.value)} placeholder="optionnel" />
+        </Field>
+      </div>
+      <Field label="Centre / prestataire">
+        <input className="input" value={vendor} onChange={(e) => setVendor(e.target.value)} placeholder="optionnel" />
       </Field>
-      <p className="text-xs text-slate-400">La prochaine échéance sera fixée à 2 ans après cette date.</p>
+      <Field label={isCT ? 'Rapport de CT / document' : 'Document'} hint="Photo ou PDF (optionnel)">
+        <div className="space-y-2">
+          {attachments.map((a, i) => (
+            <div key={i} className="flex items-center gap-2 rounded-xl bg-slate-100 p-2 dark:bg-white/5">
+              {isPdfDataUrl(a.dataUrl) ? (
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-red-100 text-red-600 dark:bg-red-500/15"><FileText size={18} /></span>
+              ) : (
+                <img src={a.dataUrl} alt="" className="h-10 w-10 shrink-0 rounded-lg object-cover" />
+              )}
+              <span className="min-w-0 flex-1 truncate text-sm">{a.title}</span>
+              <button className="rounded-lg p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10" onClick={() => setAttachments((arr) => arr.filter((_, idx) => idx !== i))} aria-label="Retirer">
+                <X size={16} />
+              </button>
+            </div>
+          ))}
+          <button className="btn-ghost w-full" onClick={addAttachment} disabled={busy}>
+            <Paperclip size={16} /> {busy ? 'Chargement…' : 'Ajouter un document'}
+          </button>
+        </div>
+      </Field>
+      <p className="text-xs text-slate-400">
+        Enregistré dans l'historique et les dépenses.{' '}
+        {isCT ? 'Prochain CT fixé à +2 ans.' : deadline.recurrenceMonths ? `Prochaine échéance dans ${deadline.recurrenceMonths} mois.` : ''}
+      </p>
     </Modal>
   )
 }

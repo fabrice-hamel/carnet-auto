@@ -29,6 +29,7 @@ export default function MaintenanceTab({ vehicle }: { vehicle: Vehicle }) {
   const [addStatus, setAddStatus] = useState<'planned' | 'done' | null>(null)
   const [editingHistory, setEditingHistory] = useState<ServiceRecord | null>(null)
   const [forceDone, setForceDone] = useState(false)
+  const [formPrefill, setFormPrefill] = useState<{ title?: string; taskId?: number; mileage?: number } | undefined>()
 
   if (!tasks) return null
 
@@ -47,31 +48,55 @@ export default function MaintenanceTab({ vehicle }: { vehicle: Vehicle }) {
     setAddStatus(null)
     setEditingHistory(null)
     setForceDone(false)
+    setFormPrefill(undefined)
+  }
+  // Agir depuis une suggestion : créer un devis ou enregistrer la réalisation, pré-rempli.
+  const planFromSuggestion = (s: { task: MaintenanceTask; computed: TaskComputed }) => {
+    setFormPrefill({ title: s.task.title, taskId: s.task.id, mileage: s.computed.dueKm })
+    setAddStatus('planned')
+  }
+  const doneFromSuggestion = (s: { task: MaintenanceTask; computed: TaskComputed }) => {
+    setFormPrefill({ title: s.task.title, taskId: s.task.id, mileage: vehicle.currentMileage })
+    setAddStatus('done')
   }
 
   return (
     <div>
-      {/* PROCHAINES MAINTENANCES — proposées d'après l'historique + le plan */}
-      {suggestions.length > 0 && (
-        <div className="mb-4">
-          <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-            <Wrench size={14} /> Prochaines maintenances
-          </p>
+      {/* À VENIR — tout ce qui arrive : maintenances suggérées + administratif + travaux prévus (devis) */}
+      <h2 className="mb-3 flex items-center gap-2 text-base font-extrabold text-slate-700 dark:text-slate-200">
+        <CalendarClock size={18} /> À venir
+      </h2>
+
+      {/* Maintenances suggérées (d'après le plan + le km) */}
+      <div className="mb-5">
+        <h3 className="mb-2 flex items-center gap-2 text-sm font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+          <Wrench size={16} /> Maintenances
+        </h3>
+        {suggestions.length === 0 ? (
+          <p className="mb-2 text-sm text-slate-400">Renseignez vos entretiens (ou le plan) pour voir les prochaines maintenances suggérées.</p>
+        ) : (
           <div className="space-y-2">
             {suggestions.map((s) => (
-              <div key={s.task.id} className={`rounded-2xl border-l-4 p-3 shadow-sm ring-1 ${suggestionTint(s.urgency)}`}>
-                <p className="font-semibold">{s.task.title}</p>
-                <p className="text-sm text-slate-600 dark:text-slate-300">{dueText(s.computed)}</p>
+              <div key={s.task.id} className={`rounded-2xl border-l-4 p-3.5 shadow-sm ring-1 ${suggestionTint(s.urgency)}`}>
+                <div className="flex items-start gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="font-semibold">{s.task.title}</p>
+                    <p className="text-sm text-slate-600 dark:text-slate-300">{dueText(s.computed)}</p>
+                  </div>
+                  <div className="flex shrink-0 flex-col items-end gap-1">
+                    <button className="btn-ghost !px-2.5 !py-1.5 text-xs" onClick={() => planFromSuggestion(s)} title="Créer un devis / planifier">
+                      <Plus size={14} /> Devis
+                    </button>
+                    <button className="btn-primary !px-2.5 !py-1.5 text-xs" onClick={() => doneFromSuggestion(s)} title="Enregistrer comme réalisé">
+                      <Check size={14} /> Réalisé
+                    </button>
+                  </div>
+                </div>
               </div>
             ))}
           </div>
-        </div>
-      )}
-
-      {/* À VENIR — tout ce qui arrive : administratif (CT, assurance…) + travaux prévus (devis) */}
-      <h2 className="mb-2 flex items-center gap-2 text-base font-extrabold text-slate-700 dark:text-slate-200">
-        <CalendarClock size={18} /> À venir
-      </h2>
+        )}
+      </div>
 
       {/* Administratif (échéances légales/papiers) */}
       <div className="mb-5">
@@ -218,6 +243,7 @@ export default function MaintenanceTab({ vehicle }: { vehicle: Vehicle }) {
           initial={editingHistory ?? undefined}
           defaultStatus={addStatus ?? undefined}
           forceDone={forceDone}
+          prefill={formPrefill}
           onClose={closeForm}
         />
       )}
@@ -286,7 +312,7 @@ function ServiceCard({
       <div className="flex shrink-0 flex-col items-end gap-1">
         {planned && onMarkDone && (
           <button className="btn-primary !px-2.5 !py-1.5 text-xs" onClick={onMarkDone} title="Marquer comme réalisé">
-            <Check size={14} /> Marquer fait
+            <Check size={14} /> Marquer réalisé
           </button>
         )}
         <div className="flex gap-1">
@@ -346,6 +372,7 @@ function HistoryForm({
   initial,
   defaultStatus,
   forceDone,
+  prefill,
   onClose,
 }: {
   vehicle: Vehicle
@@ -353,6 +380,7 @@ function HistoryForm({
   initial?: ServiceRecord
   defaultStatus?: 'planned' | 'done'
   forceDone?: boolean
+  prefill?: { title?: string; taskId?: number; mileage?: number }
   onClose: () => void
 }) {
   const [status, setStatus] = useState<'planned' | 'done'>(
@@ -360,9 +388,9 @@ function HistoryForm({
   )
   const isPlanned = status === 'planned'
   const [date, setDate] = useState(initial?.date ?? todayISO())
-  const [mileage, setMileage] = useState(String(initial?.mileage ?? vehicle.currentMileage))
-  const [title, setTitle] = useState(initial?.title ?? '')
-  const [taskId, setTaskId] = useState(initial?.taskId ? String(initial.taskId) : '')
+  const [mileage, setMileage] = useState(String(initial?.mileage ?? prefill?.mileage ?? vehicle.currentMileage))
+  const [title, setTitle] = useState(initial?.title ?? prefill?.title ?? '')
+  const [taskId, setTaskId] = useState(initial?.taskId ? String(initial.taskId) : prefill?.taskId ? String(prefill.taskId) : '')
   const [cost, setCost] = useState(initial?.cost != null ? String(initial.cost) : '')
   const [vendor, setVendor] = useState(initial?.vendor ?? '')
   const [notes, setNotes] = useState(initial?.notes ?? '')
