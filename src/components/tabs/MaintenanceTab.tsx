@@ -1,10 +1,10 @@
 import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { Plus, Pencil, Check, History, Trash2, ChevronDown } from 'lucide-react'
+import { Plus, Pencil, Check, History, Trash2, ChevronDown, Wrench } from 'lucide-react'
 import { db } from '../../db/db'
 import { completeTask } from '../../db/repo'
-import type { MaintenanceTask, Vehicle } from '../../db/types'
-import { computeTask } from '../../lib/scheduling'
+import type { MaintenanceTask, ServiceRecord, Settings, Vehicle } from '../../db/types'
+import { computeTask, type TaskComputed, type Urgency } from '../../lib/scheduling'
 import { useSettings } from '../../lib/useSettings'
 import { Modal, Field, StatusBadge, EmptyState, ConfirmButton, urgencyDot } from '../ui'
 import { formatKm, formatDate, todayISO, nowISO, formatMoney } from '../../lib/format'
@@ -22,11 +22,25 @@ export default function MaintenanceTab({ vehicle }: { vehicle: Vehicle }) {
   const [completing, setCompleting] = useState<MaintenanceTask | null>(null)
   const [showPlan, setShowPlan] = useState(true)
   const [addingHistory, setAddingHistory] = useState(false)
+  const [editingHistory, setEditingHistory] = useState<ServiceRecord | null>(null)
 
   if (!tasks) return null
 
+  const suggestion = nextSuggestion(tasks, vehicle, settings)
+
   return (
     <div>
+      {/* PROCHAINE MAINTENANCE — proposée d'après l'historique + le plan */}
+      {suggestion && (
+        <div className={`mb-4 rounded-2xl border-l-4 p-3.5 shadow-sm ring-1 ${suggestionTint(suggestion.urgency)}`}>
+          <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+            <Wrench size={14} /> Prochaine maintenance
+          </p>
+          <p className="mt-1 font-semibold">{suggestion.task.title}</p>
+          <p className="text-sm text-slate-600 dark:text-slate-300">{dueText(suggestion.computed)}</p>
+        </div>
+      )}
+
       {/* HISTORIQUE — interventions réellement effectuées (en premier) */}
       <div className="mb-3 flex items-center justify-between">
         <h2 className="flex items-center gap-2 text-sm font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
@@ -56,12 +70,21 @@ export default function MaintenanceTab({ vehicle }: { vehicle: Vehicle }) {
                 </p>
                 {s.notes && <p className="mt-0.5 text-xs text-slate-400">{s.notes}</p>}
               </div>
-              <ConfirmButton
-                label={<Trash2 size={15} />}
-                className="rounded-lg p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10"
-                confirmText="Supprimer cette intervention de l'historique ?"
-                onConfirm={() => db.services.delete(s.id!)}
-              />
+              <div className="flex shrink-0 items-center gap-1">
+                <button
+                  className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-white/10"
+                  onClick={() => setEditingHistory(s)}
+                  aria-label="Modifier"
+                >
+                  <Pencil size={15} />
+                </button>
+                <ConfirmButton
+                  label={<Trash2 size={15} />}
+                  className="rounded-lg p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10"
+                  confirmText="Supprimer cette intervention de l'historique ?"
+                  onConfirm={() => db.services.delete(s.id!)}
+                />
+              </div>
             </div>
           ))}
         </div>
@@ -140,20 +163,84 @@ export default function MaintenanceTab({ vehicle }: { vehicle: Vehicle }) {
         />
       )}
       {completing && <CompleteForm vehicle={vehicle} task={completing} onClose={() => setCompleting(null)} />}
-      {addingHistory && <HistoryForm vehicle={vehicle} onClose={() => setAddingHistory(false)} />}
+      {(addingHistory || editingHistory) && (
+        <HistoryForm
+          vehicle={vehicle}
+          tasks={tasks}
+          initial={editingHistory ?? undefined}
+          onClose={() => {
+            setAddingHistory(false)
+            setEditingHistory(null)
+          }}
+        />
+      )}
     </div>
   )
 }
 
-function HistoryForm({ vehicle, onClose }: { vehicle: Vehicle; onClose: () => void }) {
-  const [date, setDate] = useState(todayISO())
-  const [mileage, setMileage] = useState(String(vehicle.currentMileage))
-  const [title, setTitle] = useState('')
-  const [cost, setCost] = useState('')
-  const [vendor, setVendor] = useState('')
-  const [notes, setNotes] = useState('')
+/** Propose la prochaine maintenance : la tâche du plan dont l'échéance (km/temps) est la plus proche. */
+function nextSuggestion(
+  tasks: MaintenanceTask[],
+  vehicle: Vehicle,
+  settings: Settings,
+): { task: MaintenanceTask; computed: TaskComputed; urgency: Urgency } | null {
+  let best: { task: MaintenanceTask; computed: TaskComputed; key: number; urgency: Urgency } | null = null
+  for (const t of tasks) {
+    if (!t.active) continue
+    const c = computeTask(t, vehicle, settings)
+    if (c.urgency === 'unknown') continue
+    // "jours avant échéance" effectif : min entre l'échéance temps et l'échéance km estimée
+    const kmDays =
+      c.kmRemaining !== undefined && vehicle.avgKmPerYear > 0
+        ? (c.kmRemaining / vehicle.avgKmPerYear) * 365
+        : undefined
+    const key = Math.min(c.daysRemaining ?? Infinity, kmDays ?? Infinity)
+    if (best === null || key < best.key) best = { task: t, computed: c, key, urgency: c.urgency }
+  }
+  return best ? { task: best.task, computed: best.computed, urgency: best.urgency } : null
+}
+
+function suggestionTint(urgency: Urgency): string {
+  switch (urgency) {
+    case 'overdue':
+      return 'border-red-500 bg-red-50 ring-red-100 dark:bg-red-500/10 dark:ring-red-500/20'
+    case 'soon':
+      return 'border-amber-500 bg-amber-50 ring-amber-100 dark:bg-amber-500/10 dark:ring-amber-500/20'
+    default:
+      return 'border-emerald-500 bg-emerald-50 ring-emerald-100 dark:bg-emerald-500/10 dark:ring-emerald-500/20'
+  }
+}
+
+function HistoryForm({
+  vehicle,
+  tasks,
+  initial,
+  onClose,
+}: {
+  vehicle: Vehicle
+  tasks: MaintenanceTask[]
+  initial?: ServiceRecord
+  onClose: () => void
+}) {
+  const [date, setDate] = useState(initial?.date ?? todayISO())
+  const [mileage, setMileage] = useState(String(initial?.mileage ?? vehicle.currentMileage))
+  const [title, setTitle] = useState(initial?.title ?? '')
+  const [taskId, setTaskId] = useState(initial?.taskId ? String(initial.taskId) : '')
+  const [cost, setCost] = useState(initial?.cost != null ? String(initial.cost) : '')
+  const [vendor, setVendor] = useState(initial?.vendor ?? '')
+  const [notes, setNotes] = useState(initial?.notes ?? '')
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
+  const isEdit = !!initial?.id
+
+  // Si on choisit une tâche et que le titre est vide, on reprend le nom de la tâche.
+  const onPickTask = (val: string) => {
+    setTaskId(val)
+    if (val && !title.trim()) {
+      const t = tasks.find((x) => String(x.id) === val)
+      if (t) setTitle(t.title)
+    }
+  }
 
   const save = async () => {
     if (!title.trim()) {
@@ -161,16 +248,32 @@ function HistoryForm({ vehicle, onClose }: { vehicle: Vehicle; onClose: () => vo
       return
     }
     setSaving(true)
+    const tid = taskId ? Number(taskId) : undefined
     try {
-      await completeTask({
-        vehicleId: vehicle.id!,
-        date,
-        mileage: Number(mileage) || 0,
-        title: title.trim(),
-        cost: cost ? Number(cost) : undefined,
-        vendor: vendor.trim() || undefined,
-        notes: notes.trim() || undefined,
-      })
+      if (isEdit) {
+        await db.services.update(initial!.id!, {
+          date,
+          mileage: Number(mileage) || 0,
+          title: title.trim(),
+          taskId: tid,
+          cost: cost ? Number(cost) : undefined,
+          vendor: vendor.trim() || undefined,
+          notes: notes.trim() || undefined,
+        })
+        // si reliée à une tâche, on met à jour son dernier entretien
+        if (tid) await db.tasks.update(tid, { lastDoneDate: date, lastDoneKm: Number(mileage) || 0 })
+      } else {
+        await completeTask({
+          vehicleId: vehicle.id!,
+          taskId: tid,
+          date,
+          mileage: Number(mileage) || 0,
+          title: title.trim(),
+          cost: cost ? Number(cost) : undefined,
+          vendor: vendor.trim() || undefined,
+          notes: notes.trim() || undefined,
+        })
+      }
       onClose()
     } catch (e) {
       setError('Erreur lors de l’enregistrement : ' + (e as Error).message)
@@ -182,7 +285,7 @@ function HistoryForm({ vehicle, onClose }: { vehicle: Vehicle; onClose: () => vo
     <Modal
       open
       onClose={onClose}
-      title="Ajouter à l'historique"
+      title={isEdit ? "Modifier l'intervention" : "Ajouter à l'historique"}
       footer={
         <>
           <button className="btn-ghost" onClick={onClose}>Annuler</button>
@@ -194,6 +297,16 @@ function HistoryForm({ vehicle, onClose }: { vehicle: Vehicle; onClose: () => vo
         <input className="input" value={title} onChange={(e) => { setTitle(e.target.value); setError('') }} placeholder="Ex. Remplacement plaquettes avant" autoFocus />
       </Field>
       {error && <p className="-mt-1 mb-2 text-sm font-medium text-red-600 dark:text-red-400">{error}</p>}
+      {tasks.length > 0 && (
+        <Field label="Concerne la tâche du plan" hint="Relie cette intervention à une tâche pour recalculer la prochaine échéance.">
+          <select className="input" value={taskId} onChange={(e) => onPickTask(e.target.value)}>
+            <option value="">— Aucune (intervention libre) —</option>
+            {tasks.map((t) => (
+              <option key={t.id} value={String(t.id)}>{t.title}</option>
+            ))}
+          </select>
+        </Field>
+      )}
       <div className="grid grid-cols-2 gap-3">
         <Field label="Date">
           <input type="date" className="input" value={date} onChange={(e) => setDate(e.target.value)} />
@@ -213,7 +326,9 @@ function HistoryForm({ vehicle, onClose }: { vehicle: Vehicle; onClose: () => vo
       <Field label="Notes">
         <textarea className="input" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="optionnel" />
       </Field>
-      <p className="text-xs text-slate-400">Pour consigner les interventions déjà faites (avant l'achat ou hors plan d'entretien).</p>
+      <p className="text-xs text-slate-400">
+        Reliez l'intervention à une tâche du plan pour que l'app propose automatiquement la prochaine échéance.
+      </p>
     </Modal>
   )
 }
